@@ -3,7 +3,7 @@
   python tools/build_repo.py                      # rebuild notebooks/ from _zips/
   python tools/build_repo.py --repo owner/name    # also regenerate README.md links
 """
-import argparse, json, pathlib, re, shutil, zipfile
+import argparse, json, pathlib, re, shutil, sys, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ZIPS, OUT = ROOT / "_zips", ROOT / "notebooks"
@@ -12,7 +12,35 @@ INSTALL_MD = (
     "> **Open in Google Colab.** The next cell installs `coptpy`. The bundled free "
     "license is size-limited but covers this case. Then run *Runtime > Run all*.\n"
 )
-INSTALL_CODE = ["# COPT Python API\n", "%pip install -q coptpy\n"]
+# module name -> pip name, for third-party imports found in a case
+PIP_NAME = {"sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "pillow",
+            "yaml": "pyyaml", "skimage": "scikit-image", "mpl_toolkits": "matplotlib"}
+# never pip-install these: stdlib or provided by Colab already
+STDLIB = set(sys.stdlib_module_names) | {"coptpy", "google", "__future__"}
+
+
+def imports_of(nb):
+    """Third-party top-level modules a notebook imports."""
+    found = set()
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        src = "".join(c.get("source", []))
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", src, re.M):
+            top = m.group(1).split(".")[0]
+            if top not in STDLIB:
+                found.add(PIP_NAME.get(top, top))
+    return found
+
+
+def install_cell(extra):
+    pkgs = " ".join(["coptpy"] + sorted(extra))
+    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [],
+            "source": ["# COPT Python API and this case's dependencies\n",
+                       f"%pip install -q {pkgs}\n"]}
+
+
+KERNEL = {"display_name": "Python 3", "language": "python", "name": "python3"}
 
 
 def slug(title):
@@ -20,14 +48,29 @@ def slug(title):
 
 
 def colab_ready(nb):
+    # a few cases ship a conda bootstrap that cannot work on Colab
+    for c in nb.get("cells", []):
+        src = "".join(c.get("source", []))
+        if c.get("cell_type") == "code" and "conda create" in src:
+            c["source"] = ["# Colab has no conda; install this case's requirements with pip\n",
+                           "%pip install -q -r requirements.txt\n"]
+            c["outputs"] = []
+        elif c.get("cell_type") == "markdown" and "conda" in src.lower():
+            c["source"] = ["## Install Dependencies\n",
+                           "Run the cell below to install this case's packages "
+                           "(`requirements.txt`) into the Colab runtime. "
+                           "No environment switch or kernel change is needed.\n"]
+
     head = "".join("".join(c.get("source", [])) for c in nb.get("cells", [])[:4])
     if "pip install" not in head:
         nb["cells"][:0] = [
             {"cell_type": "markdown", "metadata": {}, "source": [INSTALL_MD]},
-            {"cell_type": "code", "execution_count": None, "metadata": {},
-             "outputs": [], "source": INSTALL_CODE},
+            install_cell(imports_of(nb)),
         ]
-    nb.setdefault("metadata", {})["colab"] = {"provenance": [], "toc_visible": True}
+    md = nb.setdefault("metadata", {})
+    md["colab"] = {"provenance": [], "toc_visible": True}
+    md["kernelspec"] = dict(KERNEL)      # vendor zips carry kernels that do not exist elsewhere
+    md.pop("language_info", None)
     return nb
 
 
@@ -48,6 +91,21 @@ def data_cell(case_dir, files, repo, branch):
     )
     return {"cell_type": "code", "execution_count": None, "metadata": {},
             "outputs": [], "source": [l + "\n" for l in src.split("\n")]}
+
+
+STATUS_ICON = {"ok": "\u2705", "license": "\U0001f511", "issue": "\u26a0\ufe0f"}
+
+
+def load_status():
+    f = ROOT / "status.tsv"
+    if not f.exists():
+        return {}
+    out = {}
+    for line in f.read_text().splitlines():
+        if line.strip():
+            title, kind, note = line.split("\t")
+            out[title] = (kind, note)
+    return out
 
 
 def load_manifest():
@@ -136,14 +194,27 @@ def readme(cases, repo, branch):
         "documentation site, packaged so it runs in Google Colab with one click. Each notebook",
         "opens with a `pip install coptpy` cell; the bundled free license is size-limited but",
         "covers every case here, so no license file is needed.", "",
-        "| Case | Level | Domain | Colab | Source |", "|---|---|---|---|---|",
+        "Every case below was executed end to end on a bare Colab-like runtime with nothing",
+        "but `pip install coptpy`. \u2705 runs as is; \U0001f511 solves only with a licensed COPT",
+        "(the model is larger than the free build allows); \u26a0\ufe0f has a known glitch, noted inline.",
+        "The free build caps a MIP at 2000 variables and 2000 constraints, and a pure LP at 10000",
+        "of each.", "",
+        "| | Case | Level | Domain | Colab | Source |", "|---|---|---|---|---|---|",
     ]
+    status = load_status()
+    notes = []
     for c in cases:
         if not c.get("path"):
             continue
+        kind, note = status.get(c["title"], ("ok", ""))
+        icon = STATUS_ICON.get(kind, "")
         link = base + c["path"].replace(" ", "%20")
-        lines.append(f'| {c["title"]} | {c["difficulty"]} | {c["scene"]} | '
+        lines.append(f'| {icon} | {c["title"]} | {c["difficulty"]} | {c["scene"]} | '
                      f'[![Open In Colab]({badge})]({link}) | [doc]({c["source"]}) |')
+        if note:
+            notes.append(f'- **{c["title"]}** {icon} — {note}')
+    if notes:
+        lines += ["", "### Notes", ""] + notes
     lines += ["", "## Rebuilding", "",
               "`tools/copt_cases.py` scrapes the case list and zips from cardopt.com;",
               "`tools/build_repo.py` unpacks them into `notebooks/` and regenerates this table:", "",
