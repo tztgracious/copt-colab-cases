@@ -42,12 +42,42 @@ def install_cell(extra):
 
 KERNEL = {"display_name": "Python 3", "language": "python", "name": "python3"}
 
+# Per-case source fixes. Each entry must match, or the build fails loudly, so a
+# change upstream is noticed instead of silently dropping the fix.
+PATCHES = {
+    "Trajectory_Smoothing_Optimization": [
+        ("p_results = p.X",
+         "p_results = np.array(p.X.tolist())    # matplotlib cannot consume coptpy's NdArray"),
+        ("px_results = p_x.X", "px_results = np.array(p_x.X.tolist())"),
+        ("py_results = p_y.X", "py_results = np.array(p_y.X.tolist())"),
+    ],
+}
+
+
+def apply_patches(nb, case_slug):
+    applied = set()
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        src = "".join(c.get("source", []))
+        for old, new in PATCHES.get(case_slug, []):
+            if old in src:
+                src = src.replace(old, new)
+                applied.add(old)
+        c["source"] = [l + "\n" for l in src.split("\n")[:-1]] + [src.split("\n")[-1]]
+    expected = {old for old, _ in PATCHES.get(case_slug, [])}
+    if applied != expected:
+        raise RuntimeError(f"{case_slug}: patches did not match: {sorted(expected - applied)}")
+    return nb
+
 
 def slug(title):
     return re.sub(r"_+", "_", re.sub(r"[^0-9A-Za-z]+", "_", title)).strip("_")
 
 
-def colab_ready(nb):
+def colab_ready(nb, case_slug=None):
+    if case_slug in PATCHES:
+        apply_patches(nb, case_slug)
     # a few cases ship a conda bootstrap that cannot work on Colab
     for c in nb.get("cells", []):
         src = "".join(c.get("source", []))
@@ -170,7 +200,7 @@ def build_one(case, repo, branch):
     for n, r in nbs.items():
         out = dest / (name + ".ipynb") if flat else dest / r
         out.parent.mkdir(parents=True, exist_ok=True)
-        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")))
+        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name)
         if boot and not any("raw.githubusercontent" in "".join(c.get("source", []))
                             for c in nb["cells"][:4]):
             nb["cells"].insert(2, json.loads(json.dumps(boot)))

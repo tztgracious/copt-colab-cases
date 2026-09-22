@@ -31,7 +31,7 @@ of each.
 | ✅ | Set Cover Problem | basic | Education | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Set_Cover_Problem.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=214) |
 | ✅ | Employee Training Plan | basic | PersonnelPlan | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Employee_Training_Plan.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=213) |
 | ✅ | Customer-Store Allocation Problem | basic | SupplyChainManagemen | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Customer_Store_Allocation_Problem.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=212) |
-| ⚠️ | Trajectory Smoothing Optimization | advanced | Automatic Control | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Trajectory_Smoothing_Optimization.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=211) |
+| ✅ | Trajectory Smoothing Optimization | advanced | Automatic Control | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Trajectory_Smoothing_Optimization.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=211) |
 | ✅ | Interconnect Delay Optimization | advanced | ProductionPlan | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Interconnect_Delay_Optimization.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=209) |
 | ✅ | Binary Classification with Logistic Regression | intermediate | Education | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/Binary_Classification_with_Logistic_Regression.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=208) |
 | ✅ | 0-1 Knapsack Problem | basic | Education | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tztgracious/copt-colab-cases/blob/main/notebooks/0_1_Knapsack_Problem.ipynb) | [doc](https://www.cardopt.com/copt-document/detail?docType=4&id=204) |
@@ -46,12 +46,11 @@ of each.
 
 ### Notes
 
-- **Movie Scheduling** 🔑 — MIP 825 x 7222 — over the free 2000-variable cap
-- **Warehouse Network Management Problem** 🔑 — MIP 4127 x 4088 — over the free cap
-- **Powering a Zero-Carbon Island: Co-optimizing Wind, Solar, and Hydrogen Storage** 🔑 — LP 30698 x 24864 — over the free 10000 cap
-- **Protein Folding Problem** 🔑 — MIP 2468 constraints — over the free 2000-constraint cap
-- **Trajectory Smoothing Optimization** ⚠️ — solves fine; the final plot cell passes a coptpy NdArray to matplotlib, which recent matplotlib rejects
-- **ATM Cash Management** 🔑 — MIP 8518 x 8180 — over the free cap
+- **Movie Scheduling** 🔑 — needs a licensed COPT — MIP with 825 constraints x 7222 variables, past the free 2000-variable cap
+- **Warehouse Network Management Problem** 🔑 — needs a licensed COPT — MIP with 4127 constraints x 4088 variables
+- **Powering a Zero-Carbon Island: Co-optimizing Wind, Solar, and Hydrogen Storage** 🔑 — needs a licensed COPT — LP with 30698 constraints x 24864 variables, past the free 10000 cap
+- **Protein Folding Problem** 🔑 — needs a licensed COPT — MIP with 2468 constraints, past the free 2000-constraint cap
+- **ATM Cash Management** 🔑 — needs a licensed COPT — MIP with 8518 constraints x 8180 variables
 
 ## Rebuilding
 
