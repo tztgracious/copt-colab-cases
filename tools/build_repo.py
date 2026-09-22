@@ -54,6 +54,29 @@ PATCHES = {
 }
 
 
+def as_source(text):
+    """Split a cell body back into nbformat's list-of-lines form."""
+    lines = text.split("\n")
+    return [l + "\n" for l in lines[:-1]] + [lines[-1]]
+
+
+def inline_attachments(nb):
+    """Colab does not resolve `attachment:` image refs, so embed them as data URIs."""
+    for c in nb.get("cells", []):
+        att = c.get("attachments")
+        if not att:
+            continue
+        text = "".join(c.get("source", []))
+        for fname, payload in att.items():
+            mime, blob = next(iter(payload.items()))
+            b64 = "".join(blob) if isinstance(blob, list) else blob
+            b64 = "".join(b64.split())
+            text = text.replace(f"attachment:{fname}", f"data:{mime};base64,{b64}")
+        c.pop("attachments")
+        c["source"] = as_source(text)
+    return nb
+
+
 def apply_patches(nb, case_slug):
     applied = set()
     for c in nb.get("cells", []):
@@ -64,7 +87,7 @@ def apply_patches(nb, case_slug):
             if old in src:
                 src = src.replace(old, new)
                 applied.add(old)
-        c["source"] = [l + "\n" for l in src.split("\n")[:-1]] + [src.split("\n")[-1]]
+        c["source"] = as_source(src)
     expected = {old for old, _ in PATCHES.get(case_slug, [])}
     if applied != expected:
         raise RuntimeError(f"{case_slug}: patches did not match: {sorted(expected - applied)}")
@@ -78,6 +101,7 @@ def slug(title):
 def colab_ready(nb, case_slug=None):
     if case_slug in PATCHES:
         apply_patches(nb, case_slug)
+    inline_attachments(nb)
     # a few cases ship a conda bootstrap that cannot work on Colab
     for c in nb.get("cells", []):
         src = "".join(c.get("source", []))
