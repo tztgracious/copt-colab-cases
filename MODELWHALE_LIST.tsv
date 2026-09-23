@@ -1,0 +1,31 @@
+序号	中文名	CASE=	备注
+1	指派问题	Assignment_Problem	
+2	木材切割问题	Cutting_Stock_Problem	
+3	汇池问题	Pooling_Problem	
+4	影院排片优化	Movie_Scheduling	
+5	车间作业调度问题	Job_Shop_Scheduling_Problem	
+6	生产计划与灵敏度分析	Production_Planning_Sensitivity_Analysis	
+7	海外油气效益产量优化问题	Overseas_Oil_Gas_Benefit_Production_Optimization	有数据
+8	仓网布局问题	Warehouse_Network_Management_Problem	有数据
+9	生鲜定价与供应决策优化问题	Fresh_Produce_Pricing_Supply_Optimization	
+10	安全约束机组组合问题	Security_Constrained_Unit_Commitment	
+11	绩效评估问题	Performance_Evaluation_Problem	
+12	零碳孤岛的风光储氢协同优化	Powering_a_Zero_Carbon_Island_Co_optimizing_Wind_Solar_and_Hydrogen_Storage	有数据
+13	曲线拟合问题	Curve_fitting_Problem	
+14	蛋白质氨基酸链折叠问题	Protein_Folding_Problem	
+15	农田轮播排产问题	Farming_Planning_Problem	
+16	集合覆盖问题	Set_Cover_Problem	
+17	人员培训计划	Employee_Training_Plan	
+18	客户门店分配问题	Customer_Store_Allocation_Problem	
+19	轨迹平滑优化	Trajectory_Smoothing_Optimization	
+20	电路互连延迟优化	Interconnect_Delay_Optimization	
+21	二分类逻辑回归	Binary_Classification_with_Logistic_Regression	
+22	0-1背包问题	0_1_Knapsack_Problem	
+23	自动取款机现金管理模型	ATM_Cash_Management	有数据
+24	风险平价模型	Risk_Parity_model	有数据
+25	指数追踪投资组合	Index_Tracking_Portfolio	有数据
+26	选课问题	Curriculum_Scheduling_Problem	
+27	三维井字棋游戏	3D_Tic_Tac_Toe_Game	
+28	数独游戏	Sudoku_Game	有数据
+29	线性回归	Linear_Regression	
+30	旅行商问题	TSP_Problem	

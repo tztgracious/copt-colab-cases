@@ -44,8 +44,8 @@ def font_cell(repo, branch):
         "CAND = [FONT, os.path.join('..', 'assets', FONT), os.path.join('..', '..', 'assets', FONT),\n"
         "        os.path.join('assets', FONT)]\n"
         "URLS = [\n"
-        f"    'https://raw.githubusercontent.com/{repo}/{branch}/assets/' + FONT,\n"
         f"    'https://gitee.com/{repo}/raw/{branch}/assets/' + FONT,\n"
+        f"    'https://raw.githubusercontent.com/{repo}/{branch}/assets/' + FONT,\n"
         "]\n"
         "path = next((p for p in CAND if os.path.exists(p)), None)\n"
         "if path is None:\n"
@@ -188,18 +188,35 @@ def apply_patches(nb, case_slug, strict):
 
 def data_cell(case_dir, files, repo, branch, lang):
     """Colab loads only the .ipynb, so a case with data files must fetch them.
-    On ModelWhale the clone already placed them, and os.path.exists skips the fetch."""
-    base = f"https://raw.githubusercontent.com/{repo}/{branch}/notebooks/{lang}/{case_dir}/"
+    On ModelWhale the clone already placed them, and os.path.exists skips the fetch.
+    GitHub is unreachable from mainland China, so the Chinese notebooks try the
+    Gitee mirror first and fall back to GitHub; the English ones do the reverse."""
+    gh = f"https://raw.githubusercontent.com/{repo}/{branch}/notebooks/{lang}/{case_dir}/"
+    gt = f"https://gitee.com/{repo}/raw/{branch}/notebooks/{lang}/{case_dir}/"
+    bases = [gt, gh] if lang == "zh" else [gh, gt]
     listing = ",\n    ".join(repr(f) for f in sorted(files))
-    src = ("# Fetch this case's data files when they are not already next to the notebook.\n"
+    note = ("# \u672c\u6848\u4f8b\u9700\u8981\u6570\u636e\u6587\u4ef6\uff1b"
+            "\u82e5\u5df2\u5728 notebook \u65c1\u8fb9\u5219\u8df3\u8fc7\u4e0b\u8f7d\n"
+            if lang == "zh" else
+            "# Fetch this case's data files when they are not already next to the notebook.\n")
+    src = (note +
            "import os, urllib.parse, urllib.request\n"
-           f"BASE = {base!r}\n"
+           f"BASES = [\n    {bases[0]!r},\n    {bases[1]!r},\n]\n"
            f"FILES = [\n    {listing},\n]\n"
            "for f in FILES:\n"
-           "    if not os.path.exists(f):\n"
-           "        os.makedirs(os.path.dirname(f) or '.', exist_ok=True)\n"
-           "        urllib.request.urlretrieve(BASE + urllib.parse.quote(f), f)\n"
-           "print(len(FILES), 'data file(s) ready')")
+           "    if os.path.exists(f):\n"
+           "        continue\n"
+           "    os.makedirs(os.path.dirname(f) or '.', exist_ok=True)\n"
+           "    for b in BASES:\n"
+           "        try:\n"
+           "            urllib.request.urlretrieve(b + urllib.parse.quote(f), f)\n"
+           "            break\n"
+           "        except Exception:\n"
+           "            continue\n"
+           "missing = [f for f in FILES if not os.path.exists(f)]\n"
+           "print(len(FILES) - len(missing), '/', len(FILES), 'data file(s) ready')\n"
+           "if missing:\n"
+           "    print('NOT FETCHED:', missing)")
     return {"cell_type": "code", "execution_count": None, "metadata": {},
             "outputs": [], "source": as_source(src)}
 
@@ -279,8 +296,10 @@ def build_one(case, lang, repo, branch):
         out = dest / (name + ".ipynb") if flat else dest / r
         out.parent.mkdir(parents=True, exist_ok=True)
         nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name, lang, lang == "en", repo, branch)
-        if boot and not any("raw.githubusercontent" in "".join(c.get("source", []))
-                            for c in nb["cells"][:4]):
+        # Key the dedup on the data cell's own marker: the font cell also mentions
+        # raw.githubusercontent, and matching on that silently skipped the data cell.
+        if boot and not any("BASES = [" in "".join(c.get("source", []))
+                            for c in nb["cells"][:6]):
             nb["cells"].insert(2, json.loads(json.dumps(boot)))
         out.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
         written[r] = out
