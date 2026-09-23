@@ -1,49 +1,33 @@
-"""Turn the downloaded cardopt.com case zips into a Colab-ready notebook repo.
+"""Turn the downloaded cardopt.com case zips into a Colab/ModelWhale-ready notebook repo.
 
-  python tools/build_repo.py                      # rebuild notebooks/ from _zips/
-  python tools/build_repo.py --repo owner/name    # also regenerate README.md links
+Layout:  notebooks/en/<Case>...   notebooks/zh/<Case>...
+Case folder names are the ASCII slug of the English title in both trees, so the
+two mirror each other and the ModelWhale clone command differs only by `en`/`zh`.
+
+  python tools/build_repo.py --repo tztgracious/copt-colab-cases
 """
 import argparse, json, pathlib, re, shutil, sys, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-ZIPS, OUT = ROOT / "_zips", ROOT / "notebooks"
+OUT = ROOT / "notebooks"
+ZIPS = {"en": ROOT / "_zips", "zh": ROOT / "_zips_zh"}
 
-INSTALL_MD = (
-    "> **Open in Google Colab.** The next cell installs `coptpy`. The bundled free "
-    "license is size-limited but covers this case. Then run *Runtime > Run all*.\n"
-)
+INSTALL_MD = {
+    "en": "> **Open in Google Colab.** The next cell installs `coptpy`. The bundled free "
+          "license is size-limited but covers this case. Then run *Runtime > Run all*.\n",
+    "zh": "> **在线运行说明。** 下一格安装 `coptpy`。内置的免费许可有规模上限，但足够跑通本案例。"
+          "然后执行「运行所有」。\n",
+}
+
 # module name -> pip name, for third-party imports found in a case
 PIP_NAME = {"sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "pillow",
             "yaml": "pyyaml", "skimage": "scikit-image", "mpl_toolkits": "matplotlib"}
-# never pip-install these: stdlib or provided by Colab already
 STDLIB = set(sys.stdlib_module_names) | {"coptpy", "google", "__future__"}
 
-
-def imports_of(nb):
-    """Third-party top-level modules a notebook imports."""
-    found = set()
-    for c in nb.get("cells", []):
-        if c.get("cell_type") != "code":
-            continue
-        src = "".join(c.get("source", []))
-        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)", src, re.M):
-            top = m.group(1).split(".")[0]
-            if top not in STDLIB:
-                found.add(PIP_NAME.get(top, top))
-    return found
-
-
-def install_cell(extra):
-    pkgs = " ".join(["coptpy"] + sorted(extra))
-    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [],
-            "source": ["# COPT Python API and this case's dependencies\n",
-                       f"%pip install -q {pkgs}\n"]}
-
-
 KERNEL = {"display_name": "Python 3", "language": "python", "name": "python3"}
+SKIP_DIRS = ("__MACOSX", ".ipynb_checkpoints")
 
-# Per-case source fixes. Each entry must match, or the build fails loudly, so a
-# change upstream is noticed instead of silently dropping the fix.
+# Per-case source fixes, applied to whichever language notebooks contain the text.
 PATCHES = {
     "Trajectory_Smoothing_Optimization": [
         ("p_results = p.X",
@@ -54,10 +38,60 @@ PATCHES = {
 }
 
 
+def slug(title):
+    return re.sub(r"_+", "_", re.sub(r"[^0-9A-Za-z]+", "_", title)).strip("_")
+
+
 def as_source(text):
-    """Split a cell body back into nbformat's list-of-lines form."""
     lines = text.split("\n")
     return [l + "\n" for l in lines[:-1]] + [lines[-1]]
+
+
+def keep(name):
+    parts = pathlib.PurePosixPath(name).parts
+    return not (name.endswith("/")
+                or any(d in parts for d in SKIP_DIRS)
+                or any(pt.startswith(".") for pt in parts))
+
+
+def strip_root(names):
+    tops = {pathlib.PurePosixPath(n).parts[0] for n in names}
+    if len(tops) == 1 and all(len(pathlib.PurePosixPath(n).parts) > 1 for n in names):
+        top = tops.pop()
+        return {n: pathlib.PurePosixPath(n).relative_to(top).as_posix() for n in names}
+    return {n: n for n in names}
+
+
+def pick_primary(rel_nbs):
+    def score(r):
+        stem = pathlib.PurePosixPath(r).stem.lower()
+        return (0 if "coding" in stem else 1,
+                0 if "original" in stem or "原" in stem else 1,
+                0 if stem.endswith(("_en", "-en", "_cn", "-cn")) else 1,
+                len(pathlib.PurePosixPath(r).parts), stem)
+    return sorted(rel_nbs, key=score)[0]
+
+
+def imports_of(nb):
+    found = set()
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w.]*)",
+                             "".join(c.get("source", [])), re.M):
+            top = m.group(1).split(".")[0]
+            if top not in STDLIB:
+                found.add(PIP_NAME.get(top, top))
+    return found
+
+
+def install_cell(extra):
+    # `!pip` rather than `%pip`: ModelWhale images ship an IPython that predates the
+    # %pip magic and fails silently. `!pip` works there and on Colab alike.
+    pkgs = " ".join(["coptpy"] + sorted(extra))
+    return {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [],
+            "source": ["# COPT Python API and this case's dependencies\n",
+                       f"!pip install -q {pkgs}\n"]}
 
 
 def inline_attachments(nb):
@@ -69,15 +103,14 @@ def inline_attachments(nb):
         text = "".join(c.get("source", []))
         for fname, payload in att.items():
             mime, blob = next(iter(payload.items()))
-            b64 = "".join(blob) if isinstance(blob, list) else blob
-            b64 = "".join(b64.split())
+            b64 = "".join("".join(blob).split()) if isinstance(blob, list) else "".join(blob.split())
             text = text.replace(f"attachment:{fname}", f"data:{mime};base64,{b64}")
         c.pop("attachments")
         c["source"] = as_source(text)
     return nb
 
 
-def apply_patches(nb, case_slug):
+def apply_patches(nb, case_slug, strict):
     applied = set()
     for c in nb.get("cells", []):
         if c.get("cell_type") != "code":
@@ -90,64 +123,114 @@ def apply_patches(nb, case_slug):
         c["source"] = as_source(src)
     expected = {old for old, _ in PATCHES.get(case_slug, [])}
     if applied != expected:
-        raise RuntimeError(f"{case_slug}: patches did not match: {sorted(expected - applied)}")
+        msg = f"{case_slug}: patches did not match: {sorted(expected - applied)}"
+        if strict:
+            raise RuntimeError(msg)
+        print("  WARN " + msg)
     return nb
 
 
-def slug(title):
-    return re.sub(r"_+", "_", re.sub(r"[^0-9A-Za-z]+", "_", title)).strip("_")
+def data_cell(case_dir, files, repo, branch, lang):
+    """Colab loads only the .ipynb, so a case with data files must fetch them.
+    On ModelWhale the clone already placed them, and os.path.exists skips the fetch."""
+    base = f"https://raw.githubusercontent.com/{repo}/{branch}/notebooks/{lang}/{case_dir}/"
+    listing = ",\n    ".join(repr(f) for f in sorted(files))
+    src = ("# Fetch this case's data files when they are not already next to the notebook.\n"
+           "import os, urllib.parse, urllib.request\n"
+           f"BASE = {base!r}\n"
+           f"FILES = [\n    {listing},\n]\n"
+           "for f in FILES:\n"
+           "    if not os.path.exists(f):\n"
+           "        os.makedirs(os.path.dirname(f) or '.', exist_ok=True)\n"
+           "        urllib.request.urlretrieve(BASE + urllib.parse.quote(f), f)\n"
+           "print(len(FILES), 'data file(s) ready')")
+    return {"cell_type": "code", "execution_count": None, "metadata": {},
+            "outputs": [], "source": as_source(src)}
 
 
-def colab_ready(nb, case_slug=None):
-    if case_slug in PATCHES:
-        apply_patches(nb, case_slug)
-    inline_attachments(nb)
-    # a few cases ship a conda bootstrap that cannot work on Colab
+def colab_ready(nb, case_slug, lang, strict):
     for c in nb.get("cells", []):
         src = "".join(c.get("source", []))
         if c.get("cell_type") == "code" and "conda create" in src:
-            c["source"] = ["# Colab has no conda; install this case's requirements with pip\n",
-                           "%pip install -q -r requirements.txt\n"]
+            c["source"] = as_source("# No conda here; install this case's requirements with pip\n"
+                                    "!pip install -q -r requirements.txt")
             c["outputs"] = []
         elif c.get("cell_type") == "markdown" and "conda" in src.lower():
-            c["source"] = ["## Install Dependencies\n",
-                           "Run the cell below to install this case's packages "
-                           "(`requirements.txt`) into the Colab runtime. "
-                           "No environment switch or kernel change is needed.\n"]
-
+            c["source"] = as_source("## 安装依赖\n运行下面的单元格，把本案例的依赖装进当前运行环境。"
+                                    "不需要切换环境或更换 kernel。" if lang == "zh" else
+                                    "## Install Dependencies\nRun the cell below to install this "
+                                    "case's requirements into the runtime. No environment switch "
+                                    "or kernel change is needed.")
+    if case_slug in PATCHES:
+        apply_patches(nb, case_slug, strict)
+    inline_attachments(nb)
     head = "".join("".join(c.get("source", [])) for c in nb.get("cells", [])[:4])
     if "pip install" not in head:
         nb["cells"][:0] = [
-            {"cell_type": "markdown", "metadata": {}, "source": [INSTALL_MD]},
+            {"cell_type": "markdown", "metadata": {}, "source": [INSTALL_MD[lang]]},
             install_cell(imports_of(nb)),
         ]
     md = nb.setdefault("metadata", {})
     md["colab"] = {"provenance": [], "toc_visible": True}
-    md["kernelspec"] = dict(KERNEL)      # vendor zips carry kernels that do not exist elsewhere
+    md["kernelspec"] = dict(KERNEL)
     md.pop("language_info", None)
     return nb
 
 
-def data_cell(case_dir, files, repo, branch):
-    """Colab loads only the .ipynb, so a case with data files must fetch them."""
-    base = f"https://raw.githubusercontent.com/{repo}/{branch}/notebooks/{case_dir}/"
-    listing = ",\n    ".join(repr(f) for f in sorted(files))
-    src = (
-        "# This case needs data files. Colab opens the notebook alone, so fetch them here.\n"
-        "import os, urllib.parse, urllib.request\n"
-        f"BASE = {base!r}\n"
-        f"FILES = [\n    {listing},\n]\n"
-        "for f in FILES:\n"
-        "    if not os.path.exists(f):\n"
-        "        os.makedirs(os.path.dirname(f) or '.', exist_ok=True)\n"
-        "        urllib.request.urlretrieve(BASE + urllib.parse.quote(f), f)\n"
-        "print(len(FILES), 'data file(s) ready')"
-    )
-    return {"cell_type": "code", "execution_count": None, "metadata": {},
-            "outputs": [], "source": [l + "\n" for l in src.split("\n")]}
+def load_manifest():
+    zh = {}
+    for line in (ROOT / "manifest_zh.tsv").read_text().splitlines():
+        if line.strip():
+            cid, title, path = line.split("\t")
+            zh[cid] = {"title": title, "zip": path.rsplit("/", 1)[-1]}
+    rows = []
+    for line in (ROOT / "manifest.tsv").read_text().splitlines():
+        if not line.strip():
+            continue
+        cid, title, diff, scene, path = line.split("\t")
+        rows.append({"id": cid, "slug": slug(title),
+                     "title": {"en": title, "zh": zh[cid]["title"]},
+                     "difficulty": diff, "scene": scene,
+                     "zip": {"en": path.rsplit("/", 1)[-1], "zh": zh[cid]["zip"]},
+                     "source": {
+                         "en": f"https://www.cardopt.com/copt-document/detail?docType=4&id={cid}",
+                         "zh": f"https://www.cardopt.com/copt-document/detail?docType=4&id={cid}"}})
+    return rows
 
 
-STATUS_ICON = {"ok": "\u2705", "license": "\U0001f511", "issue": "\u26a0\ufe0f"}
+def build_one(case, lang, repo, branch):
+    zf = zipfile.ZipFile(ZIPS[lang] / case["zip"][lang])
+    names = [n for n in zf.namelist() if keep(n)]
+    rel = strip_root(names)
+    nbs = {n: r for n, r in rel.items() if r.endswith(".ipynb")}
+    if not nbs:
+        return None
+    extras = {n: r for n, r in rel.items() if not r.endswith(".ipynb")}
+    name = case["slug"]
+
+    flat = len(nbs) == 1 and not extras
+    dest = (OUT / lang) if flat else (OUT / lang / name)
+    dest.mkdir(parents=True, exist_ok=True)
+    boot = data_cell(name, extras.values(), repo, branch, lang) if extras else None
+
+    written = {}
+    for n, r in nbs.items():
+        out = dest / (name + ".ipynb") if flat else dest / r
+        out.parent.mkdir(parents=True, exist_ok=True)
+        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name, lang, lang == "en")
+        if boot and not any("raw.githubusercontent" in "".join(c.get("source", []))
+                            for c in nb["cells"][:4]):
+            nb["cells"].insert(2, json.loads(json.dumps(boot)))
+        out.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
+        written[r] = out
+    for n, r in extras.items():
+        out = dest / r
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(zf.read(n))
+    return written[pick_primary(list(written))].relative_to(ROOT).as_posix()
+
+
+STATUS_ICON = {"ok": "✅", "license": "\U0001f511", "issue": "⚠️"}
 
 
 def load_status():
@@ -162,143 +245,84 @@ def load_status():
     return out
 
 
-def load_manifest():
-    rows = []
-    for line in (ROOT / "manifest.tsv").read_text().splitlines():
-        if not line.strip():
-            continue
-        cid, title, diff, scene, path = line.split("\t")
-        rows.append({"id": cid, "title": title, "difficulty": diff, "scene": scene,
-                     "zip": path.rsplit("/", 1)[-1],
-                     "source": f"https://www.cardopt.com/copt-document/detail?docType=4&id={cid}"})
-    return rows
-
-
-SKIP_DIRS = ("__MACOSX", ".ipynb_checkpoints")
-
-
-def keep(name):
-    parts = pathlib.PurePosixPath(name).parts
-    return not (name.endswith("/")
-                or any(d in parts for d in SKIP_DIRS)
-                or any(pt.startswith(".") for pt in parts))
-
-
-def strip_root(names):
-    """Drop the single common top-level folder a zip may wrap everything in."""
-    tops = {pathlib.PurePosixPath(n).parts[0] for n in names}
-    if len(tops) == 1 and all(len(pathlib.PurePosixPath(n).parts) > 1 for n in names):
-        top = tops.pop()
-        return {n: pathlib.PurePosixPath(n).relative_to(top).as_posix() for n in names}
-    return {n: n for n in names}
-
-
-def pick_primary(rel_nbs, case):
-    """The notebook the README should link to."""
-    def score(r):
-        stem = pathlib.PurePosixPath(r).stem.lower()
-        return (0 if "coding" in stem else 1,
-                0 if "original" in stem else 1,
-                0 if stem.endswith(("_en", "-en")) else 1,
-                len(pathlib.PurePosixPath(r).parts), stem)
-    return sorted(rel_nbs, key=score)[0]
-
-
-def build_one(case, repo, branch):
-    zf = zipfile.ZipFile(ZIPS / case["zip"])
-    names = [n for n in zf.namelist() if keep(n)]
-    rel = strip_root(names)
-    nbs = {n: r for n, r in rel.items() if r.endswith(".ipynb")}
-    if not nbs:
-        return None
-    extras = {n: r for n, r in rel.items() if not r.endswith(".ipynb")}
-    name = slug(case["title"])
-
-    flat = len(nbs) == 1 and not extras
-    dest = OUT if flat else OUT / name
-    dest.mkdir(parents=True, exist_ok=True)
-
-    boot = data_cell(name, extras.values(), repo, branch) if extras else None
-
-    written = {}
-    for n, r in nbs.items():
-        out = dest / (name + ".ipynb") if flat else dest / r
-        out.parent.mkdir(parents=True, exist_ok=True)
-        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name)
-        if boot and not any("raw.githubusercontent" in "".join(c.get("source", []))
-                            for c in nb["cells"][:4]):
-            nb["cells"].insert(2, json.loads(json.dumps(boot)))
-        out.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
-        written[r] = out
-    for n, r in extras.items():
-        out = dest / r
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(zf.read(n))
-
-    primary = written[pick_primary(list(written), case)]
-    return primary.relative_to(ROOT).as_posix()
-
-
 def readme(cases, repo, branch):
-    base = f"https://colab.research.google.com/github/{repo}/blob/{branch}/"
     badge = "https://colab.research.google.com/assets/colab-badge.svg"
-    lines = [
-        "# COPT Application Cases for Google Colab", "",
-        "Every [COPT](https://www.cardopt.com/) application case from the Cardinal Operations",
-        "documentation site, packaged so it runs in Google Colab with one click. Each notebook",
-        "opens with a `pip install coptpy` cell; the bundled free license is size-limited but",
-        "covers every case here, so no license file is needed.", "",
-        "Every case below was executed end to end on a bare Colab-like runtime with nothing",
-        "but `pip install coptpy`. \u2705 runs as is; \U0001f511 solves only with a licensed COPT",
-        "(the model is larger than the free build allows); \u26a0\ufe0f has a known glitch, noted inline.",
-        "The free build caps a MIP at 2000 variables and 2000 constraints, and a pure LP at 10000",
-        "of each.", "",
-        "| | Case | Level | Domain | Colab | Source |", "|---|---|---|---|---|---|",
-    ]
+    base = f"https://colab.research.google.com/github/{repo}/blob/{branch}/"
     status = load_status()
+    L = [
+        "# COPT 应用案例 · COPT Application Cases", "",
+        "Cardinal Operations [COPT](https://www.cardopt.com/) 官网的全部应用案例，",
+        "改造成开箱即跑的 notebook。每本开头有一格 `pip install coptpy`，",
+        "内置的免费许可有规模上限（MIP 2000 变量 / 2000 约束，纯 LP 各 10000），",
+        "不需要许可文件。", "",
+        "All application cases from the COPT documentation site, packaged to run with one click.",
+        "", "---", "",
+        "## 中文版 · ModelWhale",
+        "",
+        "国内访问请用 Gitee 镜像。在 ModelWhale 新建项目后，打开 Terminal 执行：",
+        "", "```bash",
+        f"git clone --depth 1 https://gitee.com/{repo}.git /tmp/r \\",
+        "  && CASE=Assignment_Problem \\",
+        "  && { [ -d /tmp/r/notebooks/zh/$CASE ] && cp -a /tmp/r/notebooks/zh/$CASE/. ~/project/ \\",
+        "       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; }",
+        "```", "",
+        "把 `CASE` 换成下表的目录名即可。", "",
+        "| | 案例 | 难度 | 领域 | 目录名 | 官网 |", "|---|---|---|---|---|---|",
+    ]
+    for c in cases:
+        if not c["path"].get("zh"):
+            continue
+        kind, _ = status.get(c["title"]["en"], ("ok", ""))
+        L.append(f'| {STATUS_ICON.get(kind, "")} | {c["title"]["zh"]} | {c["difficulty"]} | '
+                 f'{c["scene"]} | `{c["slug"]}` | [文档]({c["source"]["zh"]}) |')
+
+    L += ["", "---", "", "## English · Google Colab", "",
+          "Every case was executed end to end on a bare runtime with nothing but",
+          "`pip install coptpy`. ✅ runs as is; \U0001f511 solves only with a licensed COPT",
+          "(the model is larger than the free build allows); ⚠️ has a known glitch.", "",
+          "| | Case | Level | Domain | Colab | Source |", "|---|---|---|---|---|---|"]
     notes = []
     for c in cases:
-        if not c.get("path"):
+        if not c["path"].get("en"):
             continue
-        kind, note = status.get(c["title"], ("ok", ""))
+        kind, note = status.get(c["title"]["en"], ("ok", ""))
         icon = STATUS_ICON.get(kind, "")
-        link = base + c["path"].replace(" ", "%20")
-        lines.append(f'| {icon} | {c["title"]} | {c["difficulty"]} | {c["scene"]} | '
-                     f'[![Open In Colab]({badge})]({link}) | [doc]({c["source"]}) |')
+        link = base + c["path"]["en"].replace(" ", "%20")
+        L.append(f'| {icon} | {c["title"]["en"]} | {c["difficulty"]} | {c["scene"]} | '
+                 f'[![Open In Colab]({badge})]({link}) | [doc]({c["source"]["en"]}) |')
         if note:
-            notes.append(f'- **{c["title"]}** {icon} — {note}')
+            notes.append(f'- **{c["title"]["en"]}** {icon} — {note}')
     if notes:
-        lines += ["", "### Notes", ""] + notes
-    lines += ["", "## Rebuilding", "",
-              "`tools/copt_cases.py` scrapes the case list and zips from cardopt.com;",
-              "`tools/build_repo.py` unpacks them into `notebooks/` and regenerates this table:", "",
-              "```bash", "python tools/copt_cases.py --out _zips --raw",
-              f"python tools/build_repo.py --repo {repo} --branch {branch}", "```", ""]
-    return "\n".join(lines)
+        L += ["", "### Notes", ""] + notes
+    L += ["", "---", "", "## Rebuilding", "",
+          "```bash", "python tools/copt_cases.py --out _zips --lang en",
+          "python tools/copt_cases.py --out _zips_zh --lang zh",
+          f"python tools/build_repo.py --repo {repo} --branch {branch}", "```", ""]
+    return "\n".join(L)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default="OWNER/REPO")
+    ap.add_argument("--repo", default="tztgracious/copt-colab-cases")
     ap.add_argument("--branch", default="main")
     a = ap.parse_args()
 
-    try:                      # some mounts disallow deletes; overwriting is fine
-        if OUT.exists():
-            shutil.rmtree(OUT)
+    try:
+        shutil.rmtree(OUT)
     except OSError:
         pass
-    OUT.mkdir(parents=True, exist_ok=True)
     cases = load_manifest()
     for c in cases:
-        try:
-            c["path"] = build_one(c, a.repo, a.branch)
-            print(("ok   " if c["path"] else "SKIP ") + c["title"] + " -> " + str(c.get("path")))
-        except Exception as e:                                           # noqa: BLE001
-            c["path"] = None
-            print(f'FAIL {c["title"]}: {type(e).__name__}: {e}')
+        c["path"] = {}
+        for lang in ("en", "zh"):
+            try:
+                c["path"][lang] = build_one(c, lang, a.repo, a.branch)
+            except Exception as e:                                    # noqa: BLE001
+                c["path"][lang] = None
+                print(f'FAIL [{lang}] {c["title"]["en"]}: {type(e).__name__}: {e}')
     (ROOT / "README.md").write_text(readme(cases, a.repo, a.branch), encoding="utf-8")
-    print(f'\n{sum(1 for c in cases if c.get("path"))}/{len(cases)} notebooks written')
+    for lang in ("en", "zh"):
+        print(f'{sum(1 for c in cases if c["path"].get(lang))}/{len(cases)} {lang} notebooks')
 
 
 if __name__ == "__main__":
