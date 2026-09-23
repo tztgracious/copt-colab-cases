@@ -17,7 +17,8 @@ All application cases from the COPT documentation site, packaged to run with one
 git clone --depth 1 https://gitee.com/tztgracious/copt-colab-cases.git /tmp/r \
   && CASE=Assignment_Problem \
   && { [ -d /tmp/r/notebooks/zh/$CASE ] && cp -a /tmp/r/notebooks/zh/$CASE/. ~/project/ \
-       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; }
+       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; } \
+  && cp /tmp/r/assets/*.otf ~/project/
 ```
 
 把 `CASE` 换成下表的目录名即可。

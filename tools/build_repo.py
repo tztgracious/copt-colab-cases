@@ -25,6 +25,62 @@ PIP_NAME = {"sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "pillow",
 STDLIB = set(sys.stdlib_module_names) | {"coptpy", "google", "__future__"}
 
 KERNEL = {"display_name": "Python 3", "language": "python", "name": "python3"}
+
+# Colab and ModelWhale runtimes ship no CJK font, and the cases ask for SimHei /
+# Microsoft YaHei / PingFang, which exist only on Windows and macOS. Naming a font
+# that is absent is worse than naming none: matplotlib pins that family and the
+# labels come out as tofu boxes. So a GB2312 subset of Noto Sans CJK SC (SIL OFL)
+# ships in assets/ and is registered ahead of whatever the notebook asks for.
+FONT_FILE = "NotoSansCJKsc-Regular-subset.otf"
+FONT_NAME = "Noto Sans CJK SC"
+
+
+def font_cell(repo, branch):
+    src = (
+        "# \u4e2d\u6587\u5b57\u4f53\uff1a\u8fd0\u884c\u73af\u5883\u901a\u5e38\u6ca1\u6709 CJK \u5b57\u4f53\uff0c"
+        "\u6ce8\u518c\u968f\u4ed3\u5e93\u5206\u53d1\u7684\u601d\u6e90\u9ed1\u4f53\u5b50\u96c6\n"
+        "import os, urllib.request, matplotlib, matplotlib.font_manager as fm\n"
+        f"FONT = {FONT_FILE!r}\n"
+        "CAND = [FONT, os.path.join('..', 'assets', FONT), os.path.join('..', '..', 'assets', FONT),\n"
+        "        os.path.join('assets', FONT)]\n"
+        "URLS = [\n"
+        f"    'https://raw.githubusercontent.com/{repo}/{branch}/assets/' + FONT,\n"
+        f"    'https://gitee.com/{repo}/raw/{branch}/assets/' + FONT,\n"
+        "]\n"
+        "path = next((p for p in CAND if os.path.exists(p)), None)\n"
+        "if path is None:\n"
+        "    for u in URLS:\n"
+        "        try:\n"
+        "            urllib.request.urlretrieve(u, FONT); path = FONT; break\n"
+        "        except Exception:\n"
+        "            continue\n"
+        "if path:\n"
+        "    fm.fontManager.addfont(path)\n"
+        "    matplotlib.rcParams['font.sans-serif'] = [fm.FontProperties(fname=path).get_name()]\n"
+        "    matplotlib.rcParams['axes.unicode_minus'] = False\n"
+        "    print('\u4e2d\u6587\u5b57\u4f53\u5df2\u5c31\u7eea:', matplotlib.rcParams['font.sans-serif'][0])\n"
+        "else:\n"
+        "    print('\u672a\u80fd\u52a0\u8f7d\u4e2d\u6587\u5b57\u4f53\uff0c\u56fe\u8868\u4e2d\u7684\u4e2d\u6587\u53ef\u80fd\u663e\u793a\u4e3a\u65b9\u5757')"
+    )
+    return {"cell_type": "code", "execution_count": None, "metadata": {},
+            "outputs": [], "source": as_source(src)}
+
+
+def prefer_bundled_font(nb):
+    """Put the bundled family first in every font list the notebook sets itself."""
+    n = 0
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        src = "".join(c.get("source", []))
+        new = re.sub(r"(rcParams\[[\'\"]font\.sans-serif[\'\"]\]\s*=\s*\[)",
+                     lambda m: m.group(1) + repr(FONT_NAME) + ", ", src)
+        new = re.sub(r"(for\s+\w+\s+in\s+\[)(?=[\'\"](?:Microsoft YaHei|SimHei|PingFang))",
+                     lambda m: m.group(1) + repr(FONT_NAME) + ", ", new)
+        if new != src:
+            c["source"] = as_source(new)
+            n += 1
+    return n
 SKIP_DIRS = ("__MACOSX", ".ipynb_checkpoints")
 
 # Per-case source fixes, applied to whichever language notebooks contain the text.
@@ -148,7 +204,7 @@ def data_cell(case_dir, files, repo, branch, lang):
             "outputs": [], "source": as_source(src)}
 
 
-def colab_ready(nb, case_slug, lang, strict):
+def colab_ready(nb, case_slug, lang, strict, repo='', branch='main'):
     for c in nb.get("cells", []):
         src = "".join(c.get("source", []))
         if c.get("cell_type") == "code" and "conda create" in src:
@@ -170,6 +226,11 @@ def colab_ready(nb, case_slug, lang, strict):
             {"cell_type": "markdown", "metadata": {}, "source": [INSTALL_MD[lang]]},
             install_cell(imports_of(nb)),
         ]
+    if lang == "zh" and "matplotlib" in "".join(
+            "".join(c.get("source", [])) for c in nb.get("cells", []) if c.get("cell_type") == "code"):
+        prefer_bundled_font(nb)
+        if not any(FONT_FILE in "".join(c.get("source", [])) for c in nb.get("cells", [])[:5]):
+            nb["cells"].insert(2, font_cell(repo, branch))
     md = nb.setdefault("metadata", {})
     md["colab"] = {"provenance": [], "toc_visible": True}
     md["kernelspec"] = dict(KERNEL)
@@ -217,7 +278,7 @@ def build_one(case, lang, repo, branch):
     for n, r in nbs.items():
         out = dest / (name + ".ipynb") if flat else dest / r
         out.parent.mkdir(parents=True, exist_ok=True)
-        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name, lang, lang == "en")
+        nb = colab_ready(json.loads(zf.read(n).decode("utf-8")), name, lang, lang == "en", repo, branch)
         if boot and not any("raw.githubusercontent" in "".join(c.get("source", []))
                             for c in nb["cells"][:4]):
             nb["cells"].insert(2, json.loads(json.dumps(boot)))
@@ -264,7 +325,8 @@ def readme(cases, repo, branch):
         f"git clone --depth 1 https://gitee.com/{repo}.git /tmp/r \\",
         "  && CASE=Assignment_Problem \\",
         "  && { [ -d /tmp/r/notebooks/zh/$CASE ] && cp -a /tmp/r/notebooks/zh/$CASE/. ~/project/ \\",
-        "       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; }",
+        "       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; } \\",
+        "  && cp /tmp/r/assets/*.otf ~/project/",
         "```", "",
         "把 `CASE` 换成下表的目录名即可。", "",
         "| | 案例 | 难度 | 领域 | 目录名 | 官网 |", "|---|---|---|---|---|---|",
