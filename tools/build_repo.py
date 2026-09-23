@@ -255,6 +255,25 @@ def colab_ready(nb, case_slug, lang, strict, repo='', branch='main'):
     return nb
 
 
+def banner_first(nb, lang):
+    """The setup cells land above the case's banner (logo + title image), so the
+    notebook opened on a pip cell. Lift the banner back to the top, but only when
+    everything above it is a cell this script added."""
+    def ours(c):
+        src = "".join(c.get("source", []))
+        return (src == INSTALL_MD[lang] or src.startswith("# COPT Python API")
+                or FONT_FILE in src or "BASES = [" in src)
+    for i, c in enumerate(nb["cells"][:8]):
+        src = "".join(c.get("source", []))
+        if c.get("cell_type") == "markdown" and re.search(r"!\[[^\]]*\]\(|<img", src):
+            if i and all(ours(p) for p in nb["cells"][:i]):
+                nb["cells"].insert(0, nb["cells"].pop(i))
+            return nb
+        if not ours(c):
+            return nb
+    return nb
+
+
 def load_manifest():
     zh = {}
     for line in (ROOT / "manifest_zh.tsv").read_text().splitlines():
@@ -283,7 +302,10 @@ def build_one(case, lang, repo, branch):
     nbs = {n: r for n, r in rel.items() if r.endswith(".ipynb")}
     if not nbs:
         return None
-    extras = {n: r for n, r in rel.items() if not r.endswith(".ipynb")}
+    # Some upstream zips carry files already wrapped by a desktop DLP tool
+    # (%TSD-Header). They are unreadable anywhere else and no notebook reads them.
+    extras = {n: r for n, r in rel.items() if not r.endswith(".ipynb")
+              and not zf.read(n).startswith(b"%TSD-Header")}
     name = case["slug"]
 
     flat = len(nbs) == 1 and not extras
@@ -301,6 +323,7 @@ def build_one(case, lang, repo, branch):
         if boot and not any("BASES = [" in "".join(c.get("source", []))
                             for c in nb["cells"][:6]):
             nb["cells"].insert(2, json.loads(json.dumps(boot)))
+        banner_first(nb, lang)
         out.write_text(json.dumps(nb, ensure_ascii=False, indent=1), encoding="utf-8")
         written[r] = out
     for n, r in extras.items():
