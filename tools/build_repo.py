@@ -348,43 +348,59 @@ def load_status():
     return out
 
 
-def readme(cases, repo, branch):
-    badge = "https://colab.research.google.com/assets/colab-badge.svg"
+LEVEL = {"basic": ("Basic", "基础"), "intermediate": ("Intermediate", "进阶"),
+         "advanced": ("Advanced", "高级")}
+# cardopt's domain tags are inconsistent (and one is truncated), so fold them here
+DOMAIN = {
+    "Education": ("Education & Research", "教育科研"),
+    "Education & Research": ("Education & Research", "教育科研"),
+    "EnergyAndElectricity": ("Energy & Power", "能源电力"),
+    "Finance": ("Finance", "金融"),
+    "Healthcare & Medicine": ("Healthcare", "医疗健康"),
+    "Manufacture": ("Manufacturing", "制造"),
+    "PersonnelPlan": ("Workforce Planning", "人员规划"),
+    "ProductionPlan": ("Production Planning", "生产计划"),
+    "SupplyChainManagemen": ("Supply Chain & Logistics", "供应链与物流"),
+    "Supply Chain & Logistics": ("Supply Chain & Logistics", "供应链与物流"),
+    "Transportation": ("Transportation", "交通运输"),
+    "Automatic Control": ("Automatic Control", "自动控制"),
+}
+MW_PROJECT = "https://www.heywhale.com/mw/project/"
+COLAB_BADGE = "https://colab.research.google.com/assets/colab-badge.svg"
+
+
+def load_modelwhale():
+    """modelwhale.tsv: case id, Chinese title, public ModelWhale project id."""
+    f = ROOT / "modelwhale.tsv"
+    if not f.exists():
+        return {}
+    rows = [l.split("\t") for l in f.read_text(encoding="utf-8").splitlines()[1:] if l.strip()]
+    return {r[0]: r[2] for r in rows}
+
+
+def note_zh(note):
+    """status.tsv notes are English; the size facts translate mechanically."""
+    s = note.replace("needs a licensed COPT — ", "")
+    s = re.sub(r"(\w+) with (\d+) constraints x (\d+) variables", r"\1，\2 约束 × \3 变量", s)
+    s = re.sub(r"(\w+) with (\d+) constraints", r"\1，\2 约束", s)
+    s = re.sub(r", past the free (\d+)-(variable|constraint) cap",
+               lambda m: f"，超出免费版 {m[1]} {'变量' if m[2] == 'variable' else '约束'}上限", s)
+    s = s.replace(", past the free 10000 cap", "，超出免费版 10000 上限")
+    return f"需要正式版 COPT 许可（{s}）"
+
+
+def readme_en(cases, repo, branch):
     base = f"https://colab.research.google.com/github/{repo}/blob/{branch}/"
     status = load_status()
-    L = [
-        "# COPT 应用案例 · COPT Application Cases", "",
-        "Cardinal Operations [COPT](https://www.cardopt.com/) 官网的全部应用案例，",
-        "改造成开箱即跑的 notebook。每本开头有一格 `pip install coptpy`，",
-        "内置的免费许可有规模上限（MIP 2000 变量 / 2000 约束，纯 LP 各 10000），",
-        "不需要许可文件。", "",
-        "All application cases from the COPT documentation site, packaged to run with one click.",
-        "", "---", "",
-        "## 中文版 · ModelWhale",
-        "",
-        "国内访问请用 Gitee 镜像。在 ModelWhale 新建项目后，打开 Terminal 执行：",
-        "", "```bash",
-        f"git clone --depth 1 https://gitee.com/{repo}.git /tmp/r \\",
-        "  && CASE=Assignment_Problem \\",
-        "  && { [ -d /tmp/r/notebooks/zh/$CASE ] && cp -a /tmp/r/notebooks/zh/$CASE/. ~/project/ \\",
-        "       || cp /tmp/r/notebooks/zh/$CASE.ipynb ~/project/; } \\",
-        "  && cp /tmp/r/assets/*.otf ~/project/",
-        "```", "",
-        "把 `CASE` 换成下表的目录名即可。", "",
-        "| | 案例 | 难度 | 领域 | 目录名 | 官网 |", "|---|---|---|---|---|---|",
-    ]
-    for c in cases:
-        if not c["path"].get("zh"):
-            continue
-        kind, _ = status.get(c["title"]["en"], ("ok", ""))
-        L.append(f'| {STATUS_ICON.get(kind, "")} | {c["title"]["zh"]} | {c["difficulty"]} | '
-                 f'{c["scene"]} | `{c["slug"]}` | [文档]({c["source"]["zh"]}) |')
-
-    L += ["", "---", "", "## English · Google Colab", "",
-          "Every case was executed end to end on a bare runtime with nothing but",
-          "`pip install coptpy`. ✅ runs as is; \U0001f511 solves only with a licensed COPT",
-          "(the model is larger than the free build allows); ⚠️ has a known glitch.", "",
-          "| | Case | Level | Domain | Colab | Source |", "|---|---|---|---|---|---|"]
+    L = ["# COPT Application Cases", "",
+         "**English** · [中文](README.zh-CN.md)", "",
+         "All application cases from the [COPT](https://www.cardopt.com/) documentation site, "
+         "packaged to open and run in Google Colab with one click. Each notebook starts by "
+         "running `pip install coptpy`. The bundled free license is size-limited (MIP 2000 "
+         "variables / 2000 constraints, pure LP 10000 each) and needs no license file.", "",
+         "✅ runs as is · \U0001f511 needs a licensed COPT (the model exceeds the free limits) "
+         "· ⚠️ known glitch", "",
+         "| | Case | Level | Domain | Run | Docs |", "|---|---|---|---|---|---|"]
     notes = []
     for c in cases:
         if not c["path"].get("en"):
@@ -392,16 +408,47 @@ def readme(cases, repo, branch):
         kind, note = status.get(c["title"]["en"], ("ok", ""))
         icon = STATUS_ICON.get(kind, "")
         link = base + c["path"]["en"].replace(" ", "%20")
-        L.append(f'| {icon} | {c["title"]["en"]} | {c["difficulty"]} | {c["scene"]} | '
-                 f'[![Open In Colab]({badge})]({link}) | [doc]({c["source"]["en"]}) |')
+        dom = DOMAIN.get(c["scene"], (c["scene"],))[0]
+        L.append(f'| {icon} | {c["title"]["en"]} | {LEVEL[c["difficulty"]][0]} | {dom} | '
+                 f'[![Open In Colab]({COLAB_BADGE})]({link}) | [link]({c["source"]["en"]}) |')
         if note:
-            notes.append(f'- **{c["title"]["en"]}** {icon} — {note}')
+            notes.append(f'- **{c["title"]["en"]}**: {note}')
     if notes:
         L += ["", "### Notes", ""] + notes
-    L += ["", "---", "", "## Rebuilding", "",
+    L += ["", "## Rebuilding", "",
           "```bash", "python tools/copt_cases.py --out _zips --lang en",
           "python tools/copt_cases.py --out _zips_zh --lang zh",
           f"python tools/build_repo.py --repo {repo} --branch {branch}", "```", ""]
+    return "\n".join(L)
+
+
+def readme_zh(cases, repo, branch):
+    status = load_status()
+    mw = load_modelwhale()
+    L = ["# COPT 应用案例", "",
+         "[English](README.md) · **中文**", "",
+         "[COPT](https://www.cardopt.com/) 官网的全部应用案例，已发布到 ModelWhale，"
+         "点链接即可在线查看、一键运行。每本开头会执行 `pip install coptpy`，"
+         "内置的免费许可有规模上限（MIP 2000 变量 / 2000 约束，纯 LP 各 10000），不需要许可文件。", "",
+         "✅ 可直接运行 · \U0001f511 模型超出免费许可上限，需正式版许可 · ⚠️ 已知问题", "",
+         "| | 案例 | 难度 | 领域 | 运行 | 文档 |", "|---|---|---|---|---|---|"]
+    notes = []
+    for c in cases:
+        if not c["path"].get("zh"):
+            continue
+        kind, note = status.get(c["title"]["en"], ("ok", ""))
+        icon = STATUS_ICON.get(kind, "")
+        dom = DOMAIN.get(c["scene"], (c["scene"], c["scene"]))[1]
+        pid = mw.get(c["id"])
+        run = f"[在线运行]({MW_PROJECT}{pid})" if pid else "—"
+        L.append(f'| {icon} | {c["title"]["zh"]} | {LEVEL[c["difficulty"]][1]} | {dom} | '
+                 f'{run} | [链接]({c["source"]["zh"]}) |')
+        if note:
+            notes.append(f'- **{c["title"]["zh"]}**：{note_zh(note)}')
+    if notes:
+        L += ["", "### 说明", ""] + notes
+    L += ["", "notebook 源文件在 `notebooks/zh/`，国内可从 "
+          f"[Gitee 镜像](https://gitee.com/{repo}) 获取。", ""]
     return "\n".join(L)
 
 
@@ -424,7 +471,8 @@ def main():
             except Exception as e:                                    # noqa: BLE001
                 c["path"][lang] = None
                 print(f'FAIL [{lang}] {c["title"]["en"]}: {type(e).__name__}: {e}')
-    (ROOT / "README.md").write_text(readme(cases, a.repo, a.branch), encoding="utf-8")
+    (ROOT / "README.md").write_text(readme_en(cases, a.repo, a.branch), encoding="utf-8")
+    (ROOT / "README.zh-CN.md").write_text(readme_zh(cases, a.repo, a.branch), encoding="utf-8")
     for lang in ("en", "zh"):
         print(f'{sum(1 for c in cases if c["path"].get(lang))}/{len(cases)} {lang} notebooks')
 
