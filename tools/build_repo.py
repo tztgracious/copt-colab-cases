@@ -6,7 +6,7 @@ two mirror each other and the ModelWhale clone command differs only by `en`/`zh`
 
   python tools/build_repo.py --repo tztgracious/copt-colab-cases
 """
-import argparse, json, pathlib, re, shutil, sys, zipfile
+import argparse, json, pathlib, re, shutil, sys, urllib.parse, zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "notebooks"
@@ -452,6 +452,20 @@ def readme_zh(cases, repo, branch):
     return "\n".join(L)
 
 
+def links_tsv(cases, repo, branch):
+    """One flat table for the website: both run links per cardopt case id.
+    Generated on every build; modelwhale.tsv stays the hand-kept input."""
+    base = f"https://colab.research.google.com/github/{repo}/blob/{branch}/"
+    mw = load_modelwhale()
+    L = ["case_id\ttitle_en\ttitle_zh\tcolab\tmodelwhale"]
+    for c in cases:
+        colab = base + urllib.parse.quote(c["path"]["en"]) if c["path"].get("en") else ""
+        pid = mw.get(c["id"])
+        L.append("\t".join([c["id"], c["title"]["en"], c["title"]["zh"], colab,
+                            MW_PROJECT + pid if pid else ""]))
+    return "\n".join(L) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default="tztgracious/copt-colab-cases")
@@ -473,6 +487,7 @@ def main():
                 print(f'FAIL [{lang}] {c["title"]["en"]}: {type(e).__name__}: {e}')
     (ROOT / "README.md").write_text(readme_en(cases, a.repo, a.branch), encoding="utf-8")
     (ROOT / "README.zh-CN.md").write_text(readme_zh(cases, a.repo, a.branch), encoding="utf-8")
+    (ROOT / "links.tsv").write_text(links_tsv(cases, a.repo, a.branch), encoding="utf-8")
     for lang in ("en", "zh"):
         print(f'{sum(1 for c in cases if c["path"].get(lang))}/{len(cases)} {lang} notebooks')
 
